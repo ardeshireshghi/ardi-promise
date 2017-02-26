@@ -1,6 +1,5 @@
 'use strict';
 
-
 const ArdiPromise = (() => {
   const PROMISE_STATE = {
     PENDING   : 'pending',
