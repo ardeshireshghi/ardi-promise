@@ -13,7 +13,7 @@ npm install ardi-promise
 * ES5
 
 ```
-const ArdiPromise = require('ardi-promise');
+const ArdiPromise = require('ardi-promise').default;
 ```
 
 * ES6
