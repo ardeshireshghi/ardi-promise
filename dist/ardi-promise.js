@@ -24,6 +24,8 @@ var ArdiPromise = function () {
       }
 
       this._state = Promise.PROMISE_STATE.PENDING;
+      this._fullfillCallbacks = [];
+      this._rejectCallbacks = [];
       this._resolveFromResolver(promiseResolver);
     }
 
@@ -43,7 +45,6 @@ var ArdiPromise = function () {
           if (this._state === Promise.PROMISE_STATE.RESOLVED) {
             didFullfill(this._fullfilledValue);
           } else if (Promise.PROMISE_STATE.PENDING) {
-            console.log('came here');
             this.setCallbacks(didFullfill, didReject);
           }
         } else if (didReject) {
@@ -60,11 +61,19 @@ var ArdiPromise = function () {
       key: 'setCallbacks',
       value: function setCallbacks(fullfill, reject) {
         if (typeof fullfill === 'function') {
-          this._fullfillCallback = fullfill;
+          if (!this._fullfillCallback0) {
+            this._fullfillCallback0 = fullfill;
+          }
+
+          this._fullfillCallbacks.push(fullfill);
         }
 
         if (typeof reject === 'function') {
-          this._rejectionCallback = reject;
+          if (!this._rejectionCallback0) {
+            this._rejectionCallback0 = reject;
+          }
+
+          this._rejectCallbacks.push(reject);
         }
       }
     }, {
@@ -111,13 +120,37 @@ var ArdiPromise = function () {
       key: 'settlePromise',
       value: function settlePromise() {
         if (this._state === Promise.PROMISE_STATE.RESOLVED) {
-          if (this._fullfillCallback) {
-            this._fullfillCallback(this._fullfilledValue);
+          if (this._fullfillCallback0) {
+            var canBePromise = this._fullfillCallback0(this._fullfilledValue);
+            if (this._fullfillCallbacks.length > 1) {
+              this._settleCallbacks(canBePromise, 1);
+            }
           }
         } else if (this._state === Promise.PROMISE_STATE.REJECTED) {
-          if (this._rejectionCallback) {
-            this._rejectionCallback(this._rejectReason);
+          if (this._rejectionCallback0) {
+            this._rejectionCallback0(this._rejectReason);
           }
+        }
+      }
+    }, {
+      key: '_settleCallbacks',
+      value: function _settleCallbacks(canBePromise, callbackIndex) {
+        var _this2 = this;
+
+        var callback = this._fullfillCallbacks[callbackIndex];
+
+        var invoke = function invoke(value) {
+          var callbackResponse = callback(value);
+
+          if (callbackIndex < _this2._fullfillCallbacks.length - 1) {
+            _this2._settleCallbacks(callbackResponse, callbackIndex + 1);
+          }
+        };
+
+        if (canBePromise instanceof Promise) {
+          canBePromise.then(invoke);
+        } else {
+          invoke(canBePromise);
         }
       }
     }, {
