@@ -6,8 +6,11 @@ Object.defineProperty(exports, "__esModule", {
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
+var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
+/*eslint no-invalid-regexp: ["error", { "allowConstructorFlags": ["u", "y"] }]*/
 var ArdiPromise = function () {
   var PROMISE_STATE = {
     PENDING: 'pending',
@@ -15,18 +18,20 @@ var ArdiPromise = function () {
     REJECTED: 'rejected'
   };
 
+  var isPromise = function isPromise(value) {
+    return (typeof value === 'undefined' ? 'undefined' : _typeof(value)) === 'object' && (value instanceof Promise || 'then' in value);
+  };
+
   var Promise = function () {
-    function Promise(promiseResolver) {
+    function Promise() {
+      var promiseResolver = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : function () {};
+
       _classCallCheck(this, Promise);
 
-      if (typeof promiseResolver !== 'function') {
-        throw new Error('Promise resolver ' + promiseResolver + ' should be function');
-      }
-
       this._state = Promise.PROMISE_STATE.PENDING;
-      this._fullfillCallbacks = [];
-      this._rejectCallbacks = [];
-      this._resolveFromResolver(promiseResolver);
+      this.promiseResolver = promiseResolver;
+
+      this._invokeResolver();
     }
 
     _createClass(Promise, [{
@@ -41,39 +46,38 @@ var ArdiPromise = function () {
     }, {
       key: '_then',
       value: function _then(didFullfill, didReject) {
-        if (didFullfill) {
+        this.setCallbacks(didFullfill, didReject);
+        this.nextPromise = new Promise();
+
+        if (this.isConcluded()) {
           if (this._state === Promise.PROMISE_STATE.RESOLVED) {
-            didFullfill(this._fullfilledValue);
-          } else if (Promise.PROMISE_STATE.PENDING) {
-            this.setCallbacks(didFullfill, didReject);
+            if (typeof this._fullfill === 'function') {
+              this.resolve(this._fullfilledValue);
+            } else {
+              this.nextPromise(this._fullfilledValue);
+            }
           }
-        } else if (didReject) {
+
           if (this._state === Promise.PROMISE_STATE.REJECTED) {
-            didReject(this._rejectReason);
-          } else {
-            this.setCallbacks(didFullfill, didReject);
+            if (this._rejectionCallback) {
+              this.reject(this._rejectReason);
+            } else {
+              this.nextPromise.reject(this._rejectReason);
+            }
           }
         }
 
-        return this;
+        return this.nextPromise;
       }
     }, {
       key: 'setCallbacks',
       value: function setCallbacks(fullfill, reject) {
         if (typeof fullfill === 'function') {
-          if (!this._fullfillCallback0) {
-            this._fullfillCallback0 = fullfill;
-          }
-
-          this._fullfillCallbacks.push(fullfill);
+          this._fullfillCallback = fullfill;
         }
 
         if (typeof reject === 'function') {
-          if (!this._rejectionCallback0) {
-            this._rejectionCallback0 = reject;
-          }
-
-          this._rejectCallbacks.push(reject);
+          this._rejectionCallback = reject;
         }
       }
     }, {
@@ -82,75 +86,83 @@ var ArdiPromise = function () {
         return this.then(undefined, fn);
       }
     }, {
-      key: '_resolveFromResolver',
-      value: function _resolveFromResolver(promiseResolver) {
-        var _this = this;
-
-        this._execute(promiseResolver, function (value) {
-          _this._resolveCallback(value);
-        }, function (reason) {
-          _this._rejectCallback(reason);
-        });
+      key: 'resolve',
+      value: function resolve(value) {
+        return this._fullfill(value);
       }
     }, {
-      key: '_resolveCallback',
-      value: function _resolveCallback(value) {
-        this._fullfill(value);
+      key: 'reject',
+      value: function reject(reason) {
+        return this._reject(reason);
       }
     }, {
-      key: '_rejectCallback',
-      value: function _rejectCallback(reason) {
-        this._reject(reason);
+      key: '_invokeResolver',
+      value: function _invokeResolver() {
+        this.promiseResolver(this._fullfill.bind(this), this._reject.bind(this));
       }
     }, {
       key: '_fullfill',
       value: function _fullfill(value) {
+        var _this = this;
+
         this._fullfilledValue = value;
+
         this.setResolved();
-        this.settlePromise();
+
+        if (this._fullfillCallback) {
+          var result = this.settlePromise();
+
+          if (isPromise(result)) {
+            return result.then(function (newValue) {
+              return _this.nextPromise.resolve(newValue);
+            });
+          } else {
+            return this.nextPromise.resolve(result);
+          }
+        }
       }
     }, {
       key: '_reject',
       value: function _reject(reason) {
+        var _this2 = this;
+
         this._rejectReason = reason;
         this.setRejected();
-        this.settlePromise();
+
+        if (this._rejectionCallback) {
+          var result = void 0,
+              error = void 0;
+
+          try {
+            result = this.settlePromise();
+          } catch (err) {
+            error = err;
+          }
+
+          if (isPromise(result)) {
+            return result.then(function (value) {
+              return _this2.nextPromise.resolve(value);
+            });
+          } else {
+            if (error) {
+              return this.nextPromise.reject(error);
+            } else {
+              return this.nextPromise.resolve(result);
+            }
+          }
+        }
       }
     }, {
       key: 'settlePromise',
       value: function settlePromise() {
         if (this._state === Promise.PROMISE_STATE.RESOLVED) {
-          if (this._fullfillCallback0) {
-            var canBePromise = this._fullfillCallback0(this._fullfilledValue);
-            if (this._fullfillCallbacks.length > 1) {
-              this._settleCallbacks(canBePromise, 1);
-            }
-          }
-        } else if (this._state === Promise.PROMISE_STATE.REJECTED) {
-          if (this._rejectionCallback0) {
-            this._rejectionCallback0(this._rejectReason);
-          }
+          return this._fullfillCallback && this._fullfillCallback(this._fullfilledValue);
         }
-      }
-    }, {
-      key: '_settleCallbacks',
-      value: function _settleCallbacks(canBePromise, callbackIndex) {
-        var _this2 = this;
 
-        var callback = this._fullfillCallbacks[callbackIndex];
-
-        var invoke = function invoke(value) {
-          var callbackResponse = callback(value);
-
-          if (callbackIndex < _this2._fullfillCallbacks.length - 1) {
-            _this2._settleCallbacks(callbackResponse, callbackIndex + 1);
+        if (this._state === Promise.PROMISE_STATE.REJECTED) {
+          if (this._rejectionCallback) {
+            return this._rejectionCallback(this._rejectReason);
           }
-        };
-
-        if (canBePromise instanceof Promise) {
-          canBePromise.then(invoke);
-        } else {
-          invoke(canBePromise);
         }
       }
     }, {
@@ -164,9 +176,9 @@ var ArdiPromise = function () {
         this._state = Promise.PROMISE_STATE.REJECTED;
       }
     }, {
-      key: '_execute',
-      value: function _execute(executer, fullfill, reject) {
-        executer(fullfill, reject);
+      key: 'isConcluded',
+      value: function isConcluded() {
+        return [Promise.PROMISE_STATE.RESOLVED, Promise.PROMISE_STATE.REJECTED].includes(this._state);
       }
     }], [{
       key: 'PROMISE_STATE',

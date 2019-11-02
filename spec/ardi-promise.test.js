@@ -9,19 +9,11 @@ describe('ardi-promise', () => {
     let promise;
 
     before(() => {
-      promise = new Promise((resolve, reject) => {});
+      promise = new Promise(() => {});
     })
 
     it('should create a promise instance', () => {
       expect(promise).to.be.instanceOf(Promise);
-    });
-
-    it('should throw error when resolve function is not passed', () => {
-      const createWrongPromise = () => {
-        return new Promise();
-      };
-
-      expect(createWrongPromise).to.throw(Error, /Promise resolver undefined should be function/);
     });
   });
 
@@ -31,7 +23,7 @@ describe('ardi-promise', () => {
     before(() => {
       resolver = sinon.spy();
       promise = new Promise(resolver);
-    })
+    });
 
     it('should call the resolver with resolve reject functions', () => {
       expect(resolver.calledOnce).to.be.true;
@@ -47,7 +39,7 @@ describe('ardi-promise', () => {
       let promiseResult = 'successful result';
 
       resolver = sinon.spy();
-      promise = new Promise((resolve, reject) => {
+      promise = new Promise((resolve) => {
         resolve(promiseResult);
       }).then((result) => {
         expect(result).to.equal(promiseResult);
@@ -56,11 +48,9 @@ describe('ardi-promise', () => {
     });
 
     it('should call the "then" function with result when the promise is resolved async', (done) => {
-      let resolver, promise;
       let promiseResult = 'successful result';
 
-      resolver = sinon.spy();
-      promise = new Promise((resolve, reject) => {
+      new Promise((resolve, reject) => {
         setTimeout(() => {
           resolve(promiseResult);
         }, 300);
@@ -70,7 +60,7 @@ describe('ardi-promise', () => {
       })
     });
 
-    it('should call the none chained "then" function with result when the promise is resolved', (done) => {
+    it('should call the non-chained "then" function with result when the promise is resolved', (done) => {
       let resolver, promise;
       let promiseResult = 'successful result';
 
@@ -84,15 +74,17 @@ describe('ardi-promise', () => {
       })
     });
 
-    it('should not invoke the none chained "then" function with result when the promise is resolved', (done) => {
-      let resolver, promise;
+    it('should not invoke the non-chained "then" function with result when the promise is resolved', (done) => {
+      let promise;
       let spy = sinon.spy();
 
-      promise = new Promise((resolve, reject) => {
+      promise = new Promise((_, reject) => {
         reject(new Error('some error'));
-      })
+      });
+
+      promise
         .then(spy)
-        .catch((err) => {
+        .catch(() => {
           expect(spy.called).to.be.false;
           done();
         });
@@ -163,8 +155,8 @@ describe('ardi-promise', () => {
     });
   });
 
-  describe('Multiple chained promises - real test', () => {
-    it ('should go through the chain correcly', (done) => {
+  describe('Multiple chained promises', () => {
+    it('should go through the chain correcly', (done) => {
       const promise1 = () => {
         return new Promise((resolve, reject) => {
           setTimeout(() => {
@@ -207,6 +199,39 @@ describe('ardi-promise', () => {
           expect(res).to.equal(2010);
           done();
         });
+    });
+
+    describe('when error handler returns a value', () => {
+      it('should result into a resolved promise', (done) => {
+        new Promise((_, reject) => reject(new Error('haha')))
+          .catch(() => {
+            return 'nice';
+          })
+          .then(res => {
+            return `${res} work`;
+          })
+          .then(finalResult => {
+            expect(finalResult).to.equal('nice work');
+            done();
+          });
+      });
+    });
+
+    describe('when error handler throws an error', () => {
+      it('should result into a resolved promise', (done) => {
+        new Promise((_, reject) => reject(new Error('haha')))
+          .catch((err) => {
+            throw new Error('More haha');
+          })
+          .then(res => {
+            return `${res} work`;
+          })
+          .catch(err => {
+            expect(err).to.be.instanceOf(Error);
+            expect(err.message).to.equal('More haha');
+            done();
+          });
+      });
     });
   });
 });

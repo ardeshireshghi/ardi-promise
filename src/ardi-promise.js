@@ -1,5 +1,3 @@
-'use strict';
-
 const ArdiPromise = (() => {
   const PROMISE_STATE = {
     PENDING   : 'pending',
@@ -7,16 +5,13 @@ const ArdiPromise = (() => {
     REJECTED  : 'rejected'
   };
 
+  const isPromise = value => typeof value === 'object' && (value instanceof Promise || 'then' in value);
   class Promise {
-    constructor(promiseResolver) {
-      if (typeof promiseResolver !== 'function') {
-        throw new Error(`Promise resolver ${promiseResolver} should be function`);
-      }
-
+    constructor(promiseResolver = () => {}) {
       this._state = Promise.PROMISE_STATE.PENDING;
-      this._fullfillCallbacks = [];
-      this._rejectCallbacks = [];
-      this._resolveFromResolver(promiseResolver);
+      this.promiseResolver = promiseResolver;
+
+      this._invokeResolver();
     }
 
     static get PROMISE_STATE() {
@@ -32,38 +27,37 @@ const ArdiPromise = (() => {
     }
 
     _then(didFullfill, didReject) {
-      if (didFullfill) {
-        if (this._state === Promise.PROMISE_STATE.RESOLVED) {
-          didFullfill(this._fullfilledValue);
-        } else if (Promise.PROMISE_STATE.PENDING) {
-          this.setCallbacks(didFullfill, didReject);
+      this.setCallbacks(didFullfill, didReject);
+      this.nextPromise = new Promise();
+
+      if (this.isConcluded()) {
+        if (this._state === Promise.PROMISE_STATE.RESOLVED)  {
+          if (typeof this._fullfill === 'function') {
+            this.resolve(this._fullfilledValue);
+          } else {
+            this.nextPromise(this._fullfilledValue);
+          }
         }
-      } else if (didReject) {
+
         if (this._state === Promise.PROMISE_STATE.REJECTED) {
-          didReject(this._rejectReason);
-        } else {
-          this.setCallbacks(didFullfill, didReject);
+          if (this._rejectionCallback) {
+            this.reject(this._rejectReason);
+          } else {
+            this.nextPromise.reject(this._rejectReason);
+          }
         }
       }
 
-      return this;
+      return this.nextPromise;
     }
 
     setCallbacks(fullfill, reject) {
       if (typeof fullfill === 'function') {
-        if (!this._fullfillCallback0) {
-          this._fullfillCallback0 = fullfill;
-        }
-
-        this._fullfillCallbacks.push(fullfill);
+        this._fullfillCallback = fullfill;
       }
 
       if (typeof reject === 'function') {
-        if (!this._rejectionCallback0) {
-          this._rejectionCallback0 = reject;
-        }
-
-        this._rejectCallbacks.push(reject);
+        this._rejectionCallback = reject;
       }
     }
 
@@ -71,64 +65,72 @@ const ArdiPromise = (() => {
       return this.then(undefined, fn);
     }
 
-    _resolveFromResolver(promiseResolver) {
-      this._execute(promiseResolver, (value) => {
-        this._resolveCallback(value);
-      }, (reason) => {
-        this._rejectCallback(reason);
-      });
+    resolve(value) {
+      return this._fullfill(value);
     }
 
-    _resolveCallback(value) {
-      this._fullfill(value);
+    reject(reason) {
+      return this._reject(reason);
     }
 
-    _rejectCallback(reason) {
-      this._reject(reason);
+    _invokeResolver() {
+      this.promiseResolver(this._fullfill.bind(this), this._reject.bind(this));
     }
 
     _fullfill(value) {
       this._fullfilledValue = value;
+
       this.setResolved();
-      this.settlePromise();
+
+      if (this._fullfillCallback) {
+        const result = this.settlePromise();
+
+        if (isPromise(result)) {
+          return result.then((newValue) => {
+            return this.nextPromise.resolve(newValue);
+          });
+        } else {
+          return this.nextPromise.resolve(result);
+        }
+      }
     }
 
     _reject(reason) {
       this._rejectReason = reason;
       this.setRejected();
-      this.settlePromise();
-    }
 
-    settlePromise() {
-      if (this._state === Promise.PROMISE_STATE.RESOLVED) {
-        if (this._fullfillCallback0) {
-          let canBePromise = this._fullfillCallback0(this._fullfilledValue);
-          if (this._fullfillCallbacks.length > 1) {
-            this._settleCallbacks(canBePromise, 1);
-          }
+      if (this._rejectionCallback) {
+        let result, error;
+
+        try {
+          result = this.settlePromise();
+        } catch(err) {
+          error = err;
         }
-      } else if (this._state === Promise.PROMISE_STATE.REJECTED) {
-        if (this._rejectionCallback0) {
-          this._rejectionCallback0(this._rejectReason);
+
+        if (isPromise(result)) {
+          return result.then((value) => {
+            return this.nextPromise.resolve(value);
+          });
+        } else {
+          if (error) {
+            return this.nextPromise.reject(error);
+          } else {
+            return this.nextPromise.resolve(result);
+          }
         }
       }
     }
 
-    _settleCallbacks(canBePromise, callbackIndex) {
-      let callback = this._fullfillCallbacks[callbackIndex];
+    settlePromise() {
+      if (this._state === Promise.PROMISE_STATE.RESOLVED) {
+        return this._fullfillCallback && this._fullfillCallback(this._fullfilledValue);
+      }
 
-      let invoke = (value) => {
-        let callbackResponse = callback(value);
-
-        if (callbackIndex < this._fullfillCallbacks.length - 1) {
-          this._settleCallbacks(callbackResponse, callbackIndex + 1);
+      if (this._state === Promise.PROMISE_STATE.REJECTED) {
+        if (this._rejectionCallback) {
+          return this._rejectionCallback(this._rejectReason);
         }
-      };
-
-      if (canBePromise instanceof Promise) {
-          canBePromise.then(invoke);
-      } else {
-        invoke(canBePromise);
       }
     }
 
@@ -140,8 +142,11 @@ const ArdiPromise = (() => {
       this._state = Promise.PROMISE_STATE.REJECTED;
     }
 
-    _execute(executer, fullfill, reject) {
-      executer(fullfill, reject);
+    isConcluded() {
+      return [
+        Promise.PROMISE_STATE.RESOLVED,
+        Promise.PROMISE_STATE.REJECTED
+      ].includes(this._state);
     }
   }
 
