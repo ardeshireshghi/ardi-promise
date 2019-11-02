@@ -1,3 +1,5 @@
+### 1.0.5: Add ESLint
+
 ### 1.0.4: Patching dependency vulnerabilities
 
 ### 1.0.3: Created ES5 build with updates
